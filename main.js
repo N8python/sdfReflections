@@ -702,6 +702,7 @@ async function main() {
         effectPass.uniforms["environment"].value = environment;
         effectPass.uniforms["blueNoise"].value = noiseTex;
         effectCompositer.uniforms["sceneDiffuse"].value = defaultTexture.texture;
+        effectCompositer.uniforms["sceneDepth"].value = defaultTexture.depthTexture;
         blurs.forEach(([hblur, vblur], i) => {
             const blurSize = Math.min(Math.max((0.25 * Math.log((effectController.roughness / 2) / 0.05) + 0.25), effectController.roughness ** 0.5), 0.5) * i ** 1.5;
             hblur.uniforms["sceneDepth"].value = defaultTexture.depthTexture;

@@ -3,7 +3,8 @@ import * as THREE from 'https://cdn.skypack.dev/pin/three@v0.137.0-X5O2PK3x44y1W
 const EffectCompositer = {
     uniforms: {
         'tDiffuse': { value: null },
-        'sceneDiffuse': { value: null }
+        'sceneDiffuse': { value: null },
+        'sceneDepth': { value: null }
     },
     vertexShader: /*glsl*/ `
     varying vec2 vUv;
@@ -16,8 +17,13 @@ const EffectCompositer = {
     varying vec2 vUv;
     uniform sampler2D tDiffuse;
     uniform sampler2D sceneDiffuse;
+    uniform sampler2D sceneDepth;
     void main() {
-        gl_FragColor = vec4(texture2D(sceneDiffuse, vUv).rgb * texture2D(tDiffuse, vUv).rgb, 1.0);
+        if (texture2D(sceneDepth, vUv).x < 1.0) {
+            gl_FragColor = vec4(texture2D(sceneDiffuse, vUv).rgb * texture2D(tDiffuse, vUv).rgb, 1.0);
+        } else {
+            gl_FragColor = vec4(texture2D(sceneDiffuse, vUv).rgb, 1.0);
+        }
     }
     `
 
