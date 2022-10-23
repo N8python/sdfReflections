@@ -10,6 +10,7 @@ const EffectShader = {
         'sdfTexture1': { value: null },
         'sdfTexture2': { value: null },
         'sdfTexture3': { value: null },
+        "roughness": { value: 0.0 },
         'projectionMatrixInv': { value: new THREE.Matrix4() },
         'viewMatrixInv': { value: new THREE.Matrix4() },
         'cameraPos': { value: new THREE.Vector3() },
@@ -19,7 +20,9 @@ const EffectShader = {
         'sdfMatInv': { value: new THREE.Matrix4() },
         'resolution': { value: new THREE.Vector2() },
         'normalTexture': { value: null },
-        'lightFocus': { value: 0.0 }
+        'lightFocus': { value: 0.0 },
+        'environment': { value: null },
+        'blueNoise': { value: null }
     },
 
     vertexShader: /* glsl */ `
@@ -32,10 +35,13 @@ const EffectShader = {
     fragmentShader: /* glsl */ `
     precision highp sampler3D;
 		uniform sampler2D sceneDiffuse;
+    uniform sampler2D blueNoise;
     uniform sampler2D sceneDepth;
     uniform sampler3D sdfTexture1;
     uniform sampler3D sdfTexture2;
     uniform sampler3D sdfTexture3;
+    uniform samplerCube environment;
+    uniform float roughness;
     uniform vec3 boxCenter;
     uniform vec3 boxSize;
     varying vec2 vUv;
@@ -144,11 +150,12 @@ vec3 colorMapSampleSmart(vec3 p, vec3 n) {
         }
       }
     }
+    maxW = max(maxW, 0.1);
     col = mix(initialSample.xyz, total / maxW, 1.0 - clamp((initialSample.w) / 1.0, 0.0, 1.0));
   } else {
     col = initialSample.xyz;
   }
-  return col;
+  return clamp(col, vec3(0.0), vec3(1.0));
 }
 vec3 getNormal(vec3 samplePoint) {
   return normalize(vec3(
@@ -195,35 +202,89 @@ vec3 computeNormal(vec3 worldPos) {
   }
   return normalize(cross(hVec, vVec));
 }
+uint hash( uint x ) {
+  x += ( x << 10u );
+  x ^= ( x >>  6u );
+  x += ( x <<  3u );
+  x ^= ( x >> 11u );
+  x += ( x << 15u );
+  return x;
+}
+
+
+
+// Compound versions of the hashing algorithm I whipped together.
+uint hash( uvec2 v ) { return hash( v.x ^ hash(v.y)                         ); }
+uint hash( uvec3 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z)             ); }
+uint hash( uvec4 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w) ); }
+
+
+
+// Construct a float with half-open range [0:1] using low 23 bits.
+// All zeroes yields 0.0, all ones yields the next smallest representable value below 1.0.
+float floatConstruct( uint m ) {
+  const uint ieeeMantissa = 0x007FFFFFu; // binary32 mantissa bitmask
+  const uint ieeeOne      = 0x3F800000u; // 1.0 in IEEE binary32
+
+  m &= ieeeMantissa;                     // Keep only mantissa bits (fractional part)
+  m |= ieeeOne;                          // Add fractional part to 1.0
+
+  float  f = uintBitsToFloat( m );       // Range [1:2]
+  return f - 1.0;                        // Range [0:1]
+}
+
+
+
+// Pseudo-random value in half-open range [0:1].
+float random( float x ) { return floatConstruct(hash(floatBitsToUint(x))); }
+float random( vec2  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
+float random( vec3  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
+float random( vec4  v ) { return floatConstruct(hash(floatBitsToUint(v))); }
+
+float seed = 0.0;
+float rand()
+{
+/*float result = fract(sin(seed + mod(time, 1000.0) + dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+//_Seed += 1.0;
+seed += 1.0;
+return result;*/
+vec2 samplePoint = vUv + seed / 10.0 + mod(time / 1000.0, 100.0);
+float result = random(vec4(vUv, seed, time));
+seed += 1.0;
+return result;
+}
 		void main() {
       vec4 diffuse = texture2D(sceneDiffuse, vUv);
       float depth = texture2D(sceneDepth, vUv).x;
       vec3 worldPos = getWorldPos(depth, vUv);
       vec3 normal = (viewMatrixInv * normalize(vec4((texture2D(normalTexture, vUv).rgb - 0.5) * 2.0, 0.0))).xyz;
-      vec3 origin = cameraPos;
-      float linDepth = length(origin - worldPos);
-      vec3 rayDir = normalize(worldPos - origin);
+      normal = mix(normal, normalize(texture2D(blueNoise, vUv * (resolution / vec2(1024.0))).rgb * 2.0 - 1.0), roughness);
+      vec3 na = abs(normal);
+      vec3 n_bias = normal / max(na.x,max(na.y,na.z)) * 2.0;
+
+      vec3 origin = worldPos + n_bias;
+      vec3 rayDir = reflect(normalize(worldPos - cameraPos), normal);
+     /* if (dot(rayDir, normal) < 0.0) {
+        rayDir *= -1.0;
+      }*/
       origin = (sdfMatInv * vec4(origin, 1.0)).xyz;
       rayDir = normalize((sdfMatInv * vec4(rayDir, 0.0)).xyz);
       vec2 boxIntersectionInfo = rayBoxDist(boxCenter - boxSize / 2.0, boxCenter + boxSize / 2.0, origin, rayDir);
       float distToBox = boxIntersectionInfo.x;
       float distInsideBox = boxIntersectionInfo.y;
-      bool intersectsBox = distInsideBox > 0.0 && distToBox < linDepth - 0.1;
-      gl_FragColor = vec4(diffuse.rgb, 1.0);
+      bool intersectsBox = distInsideBox > 0.0;
       vec3 lightDir = normalize(vec3(150.0, 200.0, 50.0));
       bool intersectedSDF = false;
       vec3 col = vec3(0.0);
-      if (intersectsBox) {
-        vec3 startPos = origin + distToBox * rayDir;
-        float distanceAlongRay = 0.01;
+      bool isSky = depth == 1.0;
+      if (intersectsBox && !isSky) {
+        vec3 startPos = origin; + distToBox * rayDir;
+        float distanceAlongRay = 0.1;
         bool hit = false;
-        for(int i = 0; i < 2048; i++) {
+        int i;
+        for(i = 0; i < 2048; i++) {
           vec3 samplePoint = startPos + rayDir * distanceAlongRay;
-          if (distance(samplePoint, origin) > linDepth) {
-            break;
-          }
           vec3 tex = texCoord(samplePoint);
-          //samplePoint = (samplePoint + (boxSize / 2.0) - boxCenter) / boxSize;
           if (tex.x < 0.0 || tex.x > 1.0 || tex.y < 0.0 || tex.y > 1.0
             || tex.z < 0.0 || tex.z > 1.0) {
               break;
@@ -245,55 +306,10 @@ vec3 computeNormal(vec3 worldPos) {
           intersectedSDF = true;
         }
       }
-      /*float shadow = 0.0;
-      vec3 shadowOrigin = worldPos;
-      vec3 shadowDirection = lightDir;
-      shadowOrigin = (sdfMatInv * vec4(shadowOrigin, 1.0)).xyz;
-      shadowDirection = normalize((sdfMatInv * vec4(shadowDirection, 0.0)).xyz);
-      boxIntersectionInfo = rayBoxDist(boxCenter - boxSize / 2.0, boxCenter + boxSize / 2.0, shadowOrigin, shadowDirection);
-      distToBox = boxIntersectionInfo.x;
-      distInsideBox = boxIntersectionInfo.y;
-      intersectsBox = distInsideBox > 0.0;
-      if (intersectsBox) {
-        vec3 startPos = shadowOrigin + distToBox * shadowDirection;
-        float distanceAlongRay = 1.0;
-        bool hit = false;
-        float res = 1.0;
-        float ph = 1e20;
-        for(int i = 0; i < 2048; i++) {
-          vec3 samplePoint = startPos + shadowDirection * distanceAlongRay;
-          vec3 tex = texCoord(samplePoint);
-          //samplePoint = (samplePoint + (boxSize / 2.0) - boxCenter) / boxSize;
-          if (tex.x < 0.0 || tex.x > 1.0 || tex.y < 0.0 || tex.y > 1.0
-            || tex.z < 0.0 || tex.z > 1.0) {
-              break;
-            }
-          float distToSurface = map(tex);
-          if (distToSurface < 0.01) {
-            hit = true;
-            res = 0.0;
-            break;
-          }
-          float h = distToSurface;
-          float y = h*h/(2.0*ph);
-          float d = sqrt(h*h-y*y);
-          res = min(res, lightFocus*d/max(0.0,distanceAlongRay-y));
-          ph = h;
-          distanceAlongRay += distToSurface;
-        }
-       // shadow = 1.0 - res;
-      }*/
-      float shadow = 0.0;
-      if (intersectedSDF) {
-        float specular = clamp(dot(rayDir, reflect(lightDir, normal)), 0.0, 1.0);
-        gl_FragColor = vec4(vec3(0.25 + 0.35 * max(dot(normal, lightDir), 0.0) * (1.0 - shadow)
-        + 0.1 * max(dot(normal, -lightDir), 0.0)) * col, 1.0);
-      } else {
-        if (distance(worldPos, cameraPos) < 1000.0 && shadow > 0.0) {
-          gl_FragColor.rgb *= (1.0 - 0.7
-            * max(dot(normal, lightDir), 0.0) * shadow);
-        }
+      if(!intersectedSDF && !isSky) {
+        col = textureCube(environment, rayDir).rgb;
       }
+      gl_FragColor = vec4(col, 1.0);
       #include <dithering_fragment>
 		}`
 

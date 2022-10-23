@@ -9,11 +9,14 @@ import { OrbitControls } from 'https://unpkg.com/three@0.142.0/examples/jsm/cont
 import { TeapotGeometry } from 'https://unpkg.com/three@0.142.0/examples/jsm/geometries/TeapotGeometry.js';
 import * as BufferGeometryUtils from 'https://unpkg.com/three@0.142.0/examples/jsm/utils/BufferGeometryUtils.js';
 import * as MeshBVHLib from 'https://unpkg.com/three-mesh-bvh@0.5.10/build/index.module.js';
+import { HorizontalBlurShader } from "./HorizontalBlurShader.js";
+import { VerticalBlurShader } from "./VerticalBlurShader.js";
 import {
     GLTFLoader
 } from 'https://unpkg.com/three@0.142.0/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'https://unpkg.com/three@0.142.0/examples/jsm/libs/meshopt_decoder.module.js';
 import { DRACOLoader } from 'https://unpkg.com/three@0.142.0/examples/jsm/loaders/DRACOLoader.js';
+import { EffectCompositer } from './EffectCompositer.js';
 import {
     MeshBVH,
     MeshBVHVisualizer,
@@ -96,8 +99,6 @@ const makeSDFTextureGPU = (bvh, box, resolution, renderer, mesh) => {
     const xSize = Math.floor((box.max.x - box.min.x) * resolution);
     const ySize = Math.floor((box.max.y - box.min.y) * resolution);
     const zSize = Math.floor((box.max.z - box.min.z) * resolution);
-    console.log(xSize, ySize, zSize);
-
     const volumeData = new Float32Array(xSize * ySize * zSize);
     const positions = [];
     for (let z = box.min.z; z < box.max.z; z += (1 / resolution)) {
@@ -492,19 +493,19 @@ async function main() {
     box.position.y = 5.01;
     //scene.add(box);
     const sphere = new THREE.Mesh(new THREE.SphereGeometry(6.25, 32, 32), new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMap: environment, metalness: 1.0, roughness: 0.25 }));
-    sphere.position.y = 7.5;
-    sphere.position.x = 25;
-    sphere.position.z = 25;
+    sphere.position.y = 10;
+    sphere.position.x = 0;
+    sphere.position.z = 0;
     sphere.castShadow = true;
     sphere.receiveShadow = true;
     //scene.add(sphere);
     const torusKnot = new THREE.Mesh(new THREE.TorusKnotGeometry(5, 1.5, 200, 32), new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMap: environment, metalness: 0.5, roughness: 0.5, color: new THREE.Color(0.0, 1.0, 0.0) }));
     torusKnot.position.y = 10;
-    torusKnot.position.x = -25;
-    torusKnot.position.z = -25;
+    torusKnot.position.x = 0;
+    torusKnot.position.z = 0;
     torusKnot.castShadow = true;
     torusKnot.receiveShadow = true;
-    //scene.add(torusKnot);
+    // scene.add(torusKnot);
     const dragonGeo = (await AssetManager.loadGLTFAsync("dragon.glb")).scene.children[0].children[0].geometry;
     const bunnyGeo = (await AssetManager.loadGLTFAsync("bunny.glb")).scene.children[0].children[0].geometry;
     const dragon = new THREE.Mesh(dragonGeo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2)).applyMatrix4(new THREE.Matrix4().makeScale(3.0, 3.0, 3.0)), new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMap: environment, metalness: 0.5, roughness: 0.2, color: new THREE.Color(0.0, 1.0, 0.0) }));
@@ -515,22 +516,22 @@ async function main() {
     teapot.geometry.boundsTree = new MeshBVHLib.MeshBVH(teapot.geometry);
     const boundingBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(0, 20, 0), new THREE.Vector3(50, 40, 50));
     const boundingBoxHelper = new THREE.Box3Helper(boundingBox, 0xffff00);
-    const sponza = (await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).setDRACOLoader(new DRACOLoader().setDecoderPath("./")).loadAsync("LittlestTokyo.glb")).scene;
-    sponza.scale.set(0.48, 0.48, 0.48);
-    sponza.traverse(object => {
+    const sceneMesh = (await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).setDRACOLoader(new DRACOLoader().setDecoderPath("./")).loadAsync("sponza.glb")).scene;
+    sceneMesh.scale.set(10, 10, 10);
+    //sceneMesh.attach(torusKnot);
+    sceneMesh.traverse(object => {
         if (object.isMesh && object.material) {
             if (object.material.color.r === 0.01361838816699617) {
                 object.visible = false;
             }
-            /*if (object.material.side === THREE.FrontSide) {
+            if (object.material.side === THREE.FrontSide) {
                 object.material.side = THREE.DoubleSide;
             } else if (object.material.side === THREE.BackSide) {
-                console.log("Ye")
                 object.visible = false;
-            }*/
+            }
         }
     })
-    sponza.traverse(o => {
+    sceneMesh.traverse(o => {
         if (o.material instanceof THREE.MeshPhysicalMaterial) {
             const oldMat = o.material;
             o.material = new THREE.MeshStandardMaterial({});
@@ -560,16 +561,16 @@ async function main() {
             }
         }
     });
-    sponza.traverse(object => {
+    sceneMesh.traverse(object => {
         if (object.material) {
             object.material.envMap = environment;
             object.material.envMapIntensity = 1.0;
         }
     });
-    scene.add(sponza);
-    sponza.visible = false;
+    scene.add(sceneMesh);
+    sceneMesh.visible = true;
     let geometries = [];
-    sponza.traverse(object => {
+    sceneMesh.traverse(object => {
         const cloned = new THREE.Mesh(object.geometry, object.material);
         object.getWorldPosition(cloned.position);
         if (object.geometry && object.visible) {
@@ -604,7 +605,7 @@ async function main() {
     boundingBoxSponza.max.z = Math.ceil(boundingBoxSponza.max.z) + 1;
     //scene.add(new THREE.Box3Helper(boundingBoxSponza, 0xffff00))
     console.time();
-    let [sponzaTexture, sponzaColor] = makeSDFTextureGPU(mergedGeometry.boundsTree, boundingBoxSponza, 1.0, renderer, sponza);
+    let [sponzaTexture, sponzaColor] = makeSDFTextureGPU(mergedGeometry.boundsTree, boundingBoxSponza, 1.0, renderer, sceneMesh);
     console.timeEnd();
     /*console.time();
     let bunnyTexture = makeSDFTextureGPU(bunny.geometry.boundsTree, boundingBox, 4.0, renderer);
@@ -614,11 +615,13 @@ async function main() {
     console.timeEnd();*/
     const effectController = {
         normalStep: 1,
-        lightFocus: 32.0
+        lightFocus: 32.0,
+        roughness: 0.05
     };
     const gui = new GUI();
     gui.add(effectController, "normalStep", 0.1, 2, 0.001).name("Normal Steps");
     gui.add(effectController, "lightFocus", 1.0, 128.0, 0.001).name("Light Focus");
+    gui.add(effectController, "roughness", 0.0, 1.0, 0.001).name("Roughness");
     const defaultTexture = new THREE.WebGLRenderTarget(clientWidth, clientHeight, {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.NearestFilter,
@@ -626,10 +629,26 @@ async function main() {
     });
     defaultTexture.depthTexture = new THREE.DepthTexture(clientWidth, clientHeight, THREE.FloatType);
     // Post Effects
-    const composer = new EffectComposer(renderer);
+    const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { format: THREE.RGBAFormat, type: THREE.FloatType }));
+    composer.setSize(clientWidth, clientHeight);
     const smaaPass = new SMAAPass(clientWidth, clientHeight);
     const effectPass = new ShaderPass(EffectShader);
+    const effectCompositer = new ShaderPass(EffectCompositer);
+    const blurs = [];
+    for (let i = 0; i < 6; i++) {
+        const hblur = new ShaderPass(HorizontalBlurShader);
+        const vblur = new ShaderPass(VerticalBlurShader);
+        const blurSize = 2.0;
+        hblur.uniforms.h.value = blurSize;
+        vblur.uniforms.v.value = blurSize;
+        blurs.push([hblur, vblur]);
+    }
     composer.addPass(effectPass);
+    for (const [hblur, vblur] of blurs) {
+        composer.addPass(hblur);
+        composer.addPass(vblur)
+    }
+    composer.addPass(effectCompositer)
     composer.addPass(new ShaderPass(GammaCorrectionShader));
     composer.addPass(smaaPass);
     const sdfTransform = new THREE.Object3D();
@@ -640,7 +659,7 @@ async function main() {
     });
     normalTexture.depthTexture = new THREE.DepthTexture(clientWidth, clientWidth, THREE.FloatType);
     const normalMat = new THREE.MeshNormalMaterial();
-    const noiseTex = await new THREE.TextureLoader().loadAsync("bluenoise.png");
+    const noiseTex = await new THREE.TextureLoader().loadAsync("bluenoisebetter.png");
     noiseTex.wrapS = THREE.RepeatWrapping;
     noiseTex.wrapT = THREE.RepeatWrapping;
     noiseTex.magFilter = THREE.NearestFilter;
@@ -662,6 +681,7 @@ async function main() {
         //sdfTransform.position.y = 0;
         //sdfTransform.position.y = 0.0 + Math.sin(performance.now() / 5000);
         sdfTransform.updateMatrix();
+        effectPass.uniforms["roughness"].value = effectController.roughness / 2;
         effectPass.uniforms["sceneDiffuse"].value = defaultTexture.texture;
         effectPass.uniforms["sceneDepth"].value = defaultTexture.depthTexture;
         effectPass.uniforms["sdfTexture1"].value = sponzaTexture;
@@ -679,7 +699,24 @@ async function main() {
         effectPass.uniforms["resolution"].value = new THREE.Vector2(clientWidth, clientHeight);
         effectPass.uniforms["normalTexture"].value = normalTexture.texture;
         effectPass.uniforms["lightFocus"].value = effectController.lightFocus;
-        //effectPass.uniforms["blueNoise"].value = noiseTex;
+        effectPass.uniforms["environment"].value = environment;
+        effectPass.uniforms["blueNoise"].value = noiseTex;
+        effectCompositer.uniforms["sceneDiffuse"].value = defaultTexture.texture;
+        blurs.forEach(([hblur, vblur], i) => {
+            const blurSize = Math.min(Math.max((0.25 * Math.log((effectController.roughness / 2) / 0.05) + 0.25), effectController.roughness ** 0.5), 0.5) * i ** 1.5;
+            hblur.uniforms["sceneDepth"].value = defaultTexture.depthTexture;
+            hblur.uniforms["normalTexture"].value = normalTexture.texture;
+            hblur.uniforms["resolution"].value = new THREE.Vector2(clientWidth, clientHeight);
+            hblur.uniforms["projectionMatrixInv"].value = camera.projectionMatrixInverse;
+            hblur.uniforms["viewMatrixInv"].value = camera.matrixWorld;
+            vblur.uniforms["sceneDepth"].value = defaultTexture.depthTexture;
+            vblur.uniforms["normalTexture"].value = normalTexture.texture;
+            vblur.uniforms["resolution"].value = new THREE.Vector2(clientWidth, clientHeight);
+            vblur.uniforms["projectionMatrixInv"].value = camera.projectionMatrixInverse;
+            vblur.uniforms["viewMatrixInv"].value = camera.matrixWorld;
+            hblur.uniforms.h.value = blurSize;
+            vblur.uniforms.v.value = blurSize;
+        });
         composer.render();
         controls.update();
         stats.update();
