@@ -17,7 +17,7 @@ const EffectCompositer = {
     uniform sampler2D tDiffuse;
     uniform sampler2D sceneDiffuse;
     void main() {
-        gl_FragColor = vec4(mix(texture2D(sceneDiffuse, vUv).rgb, texture2D(tDiffuse, vUv).rgb, 0.5), 1.0);
+        gl_FragColor = vec4(texture2D(sceneDiffuse, vUv).rgb * texture2D(tDiffuse, vUv).rgb, 1.0);
     }
     `
 
